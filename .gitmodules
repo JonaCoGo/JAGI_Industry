@@ -1,0 +1,3 @@
+[submodule "JAGI_Analytics"]
+	path = JAGI_Analytics
+	url = https://github.com/JonaCoGo/JAGI_Analytics.git
