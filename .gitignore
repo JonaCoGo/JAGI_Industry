@@ -1,0 +1,77 @@
+# Ignorar archivos de Excel y bases de datos
+*.xlsx
+*.xls
+*.xlsm
+*.xltx
+*.xltm
+*.xlw
+*.xlsb
+*.csv
+*.db
+*.mdb
+*.sqlite
+*.mdbs
+*.sqlitedb
+*.dbf
+*.gsheet
+
+# Ignorar archivos temporales y de compilación
+__pycache__
+*.pyc
+*.pyo
+*.rbc
+.DS_Store
+.thumb
+.eggs
+*.cache
+*.temp*
+*.tmp*
+*.log
+*.bak
+*.backup*
+*.tmp
+
+# Ignorar archivos de configuración de agentes y entornos
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.example
+
+# Nodos y dependencias locales
+node_modules
+
+dist
+build
+*.war
+*.jar
+*.dll
+*.obj
+*.lib
+*.o
+
+# Carpeta temporal de Claude Code
+claude-code/
+
+# Archivos de sesiones
+*.session
+*.sess
+
+# Archivos de imprints (evitar subir secretos)
+*.imprints
+
+# Carpeta oculta de Claude Code
+.host
+
+# Residuos de compilación de TypeScript
+*.tsbuildinfo
+node_modules/.cache
+
+# Archivos .editorconfig y .prettierrc
+.editorconfig
+.prettierrc
+
+# Proyectos Eclipse
+.project
+.vol`
