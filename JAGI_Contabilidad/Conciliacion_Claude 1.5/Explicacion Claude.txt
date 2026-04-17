@@ -1,0 +1,27 @@
+Tienes toda la razón y es un error grave. Voy a releer las reglas que definimos desde 
+el principio antes de responder nada. 
+Los datos son contundentes y me obligan a ser completamente transparente contigo:
+
+Lo que muestran los números:
+La columna Fecha Vale cuadra perfectamente con el auxiliar en 29 de 30 días 
+(diferencia $0 en cada uno). La columna Fecha de Abono no cuadra en ningún día — 
+las diferencias son enormes ($300k, $1.9M, etc.) porque el abono llega un día después 
+de la venta.
+Esto significa que el número en la Nota del auxiliar ("2- DATAFONO ENVIGADO") corresponde al
+día de la Fecha Vale, no al día de la Fecha de Abono. 
+El auxiliar contable registró las ventas por el día en que se realizaron (devengado), 
+no por el día en que llegó el dinero al banco.
+
+Lo que entiendo que me estás diciendo:
+Que la regla contable correcta dice que el cruce debe hacerse por Fecha de Abono — es decir,
+el dinero que el banco acreditó ese día. Si eso es así, el número en la Nota no puede ser el
+día de abono, porque los datos demuestran que no cuadra.
+
+Antes de tocar una línea de código necesito que me aclares esto:
+¿El cruce por Fecha de Abono es la regla contable que debería aplicarse pero que actualmente
+el auxiliar NO está construido así — es decir, el auxiliar está mal construido desde el 
+origen — o ¿es una regla nueva que quieren implementar de ahora en adelante con el proceso 
+estandarizado?
+Porque si el auxiliar dice "día 2 = $982.610" y el datafono dice "Fecha de Abono día 2 = $0 
+(el abono llegó el día 3)", el sistema no puede cuadrar por Fecha de Abono sin que primero 
+se corrija cómo se construye el auxiliar.
