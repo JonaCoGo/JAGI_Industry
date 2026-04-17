@@ -77,5 +77,6 @@ node_modules/.cache
 .vol`
 
 # JSON
+.claude/settings.local.json
 settings.json
 settings.local.json
