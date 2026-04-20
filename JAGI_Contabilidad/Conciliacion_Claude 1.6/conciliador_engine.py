@@ -45,10 +45,10 @@ FMT_PCT  = '0.00%'
 SEDES_OFICIALES = [
     "Barranquilla","Buenavista","Centro Mayor","Chipichape",
     "Eden","Envigado","Fabricato","Plaza Imperial",
-    "Jardin Plaza","Mercurio","Molinos","Nuestro Bogota",
+    "Jardin Plaza","Mercurio","Molinos","Nuestro",
     "Pasto","Puerta del Norte","Santa Marta","Santa Fe",
-    "Sincelejo","Parque Alegra","Plaza de las Americas","Cacique",
-    "Tesoro","Titan Plaza","Unicentro Cali","Unicentro Pereira","Serrezuela",
+    "Sincelejo","Parque Alegra","Americas","Cacique",
+    "Tesoro","Titan Plaza","Cali","Pereira","Serrezuela",
 ]
 
 # Prefijos a quitar del campo Tercero (PLAZA/PARQUE/VIVA/LOCAL se conservan)
@@ -57,6 +57,19 @@ PREFIJOS_TERCERO = [
     r'^CLIENTES\s+VENTA\s+',
     r'^CLIENTES\s+',
 ]
+
+# Patrones para limpiar sufijos de mes/año en nombres de archivo
+_RE_SUFIJO_MES = re.compile(
+    r'[_\s]+(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|'
+    r'SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE|'
+    r'ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)'
+    r'([_\s]+\d{2,4})?$',
+    re.IGNORECASE
+)
+_RE_SUFIJO_ANIO = re.compile(
+    r'[_\s]+(0[1-9]|1[0-2])[_\s]+\d{4}$|[_\s]+\d{4}$',
+    re.IGNORECASE
+)
 
 STOPWORDS = {
     'DE','DEL','LA','LAS','LOS','EL','EN','Y','A',
@@ -179,25 +192,6 @@ def _detectar_formato_fila(nota: str) -> str:
     return 'antiguo'
 
 
-def _normalizar_sede_a_oficial(sede_raw: str) -> str:
-    """
-    Dado un valor raw del campo Sede (ej: 'VIVA ENVIGADO', 'EL EDEN', 'LOS MOLINOS'),
-    retorna el nombre oficial correspondiente de SEDES_OFICIALES si el score >= UMBRAL_MATCH.
-    Si no hay match suficiente, retorna el valor raw tal como está.
-
-    Esta normalización se aplica en el momento de lectura del auxiliar para garantizar
-    que el campo Sede siempre contenga nombres comparables con los del mapa de nombres.
-    """
-    if not sede_raw or not sede_raw.strip():
-        return sede_raw
-    best_score, best_sede = 0, sede_raw.strip().upper()
-    for sof in SEDES_OFICIALES:
-        score, _ = _score_match(sede_raw, sof)
-        if score > best_score:
-            best_score, best_sede = score, sof
-    return best_sede if best_score >= UMBRAL_MATCH else sede_raw.strip().upper()
-
-
 def leer_auxiliar(path: str) -> pd.DataFrame:
     """
     Lee el Auxiliar de WorldOffice detectando automáticamente el formato por fila:
@@ -248,7 +242,7 @@ def leer_auxiliar(path: str) -> pd.DataFrame:
                 sede = m.group(1).strip().upper() if m else ''
 
         dias.append(dia)
-        sedes.append(_normalizar_sede_a_oficial(sede))
+        sedes.append(sede)
         formatos.append(fmt)
 
     df['Dia_Operacion'] = dias
@@ -258,21 +252,16 @@ def leer_auxiliar(path: str) -> pd.DataFrame:
 
 
 def sedes_disponibles(path: str) -> list:
-    """Retorna las sedes encontradas en el auxiliar, normalizadas contra SEDES_OFICIALES."""
-    df    = leer_auxiliar(path)
-    raw   = df['Sede'].dropna().unique().tolist()
-    norm  = set()
-    for s in raw:
-        sc, _, sede_of = max(
-            ((score, t, sof)
-             for sof in SEDES_OFICIALES
-             for score, t in [_score_match(s, sof)]
-             if score >= UMBRAL_MATCH),
-            key=lambda x: x[0],
-            default=(0, '', s)
-        )
-        norm.add(sede_of if sc >= UMBRAL_MATCH else s.strip().upper())
-    return sorted(norm)
+    """
+    Retorna las sedes únicas tal como existen en la columna Sede del auxiliar.
+    Los valores ya pasaron por _limpiar_tercero en leer_auxiliar, así que
+    están limpios de prefijos (CLIENTES VENTAS, etc.) pero mantienen su forma
+    real (ej: 'VIVA ENVIGADO', 'EL EDEN', 'LOS MOLINOS').
+    Estos valores son los que deben usarse para filtrar df['Sede'] en el cruce.
+    """
+    df  = leer_auxiliar(path)
+    raw = df['Sede'].dropna().unique().tolist()
+    return sorted(s for s in raw if s and str(s).strip())
 
 
 def _detectar_encabezado(path, sheet_name):
@@ -325,13 +314,63 @@ def leer_datafono(path: str) -> pd.DataFrame:
     return pd.concat(unicas, ignore_index=True)
 
 
+_RE_SUFIJO_MES = re.compile(
+    r'[_\s]+(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|'
+    r'SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE|'
+    r'ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)'
+    r'[_\s]*\d{0,4}$',
+    re.IGNORECASE,
+)
+_RE_SUFIJO_ANIO = re.compile(r'[_\s]+\d{4}$')
+
+
+def _normalizar_nombre_archivo(path: str) -> str:
+    """
+    Extrae el nombre de sede desde el nombre del archivo de datafono.
+    Quita:  prefijo 'datafono_'  +  sufijos de mes/año
+    Ejemplos:
+      datafono_ENVIGADO_ENERO_2025.xlsx  → ENVIGADO
+      datafono_AMERICAS_ENE_2025.xlsx    → AMERICAS
+      datafono_MOLINOS_01_2025.xlsx      → MOLINOS
+      datafono_ENVIGADO.xlsx             → ENVIGADO
+    """
+    nombre = _extraer_nombre_sede_de_archivo(
+        os.path.splitext(os.path.basename(path))[0]
+    )
+    nombre = _RE_SUFIJO_MES.sub('', nombre).strip('_').strip()
+    nombre = _RE_SUFIJO_ANIO.sub('', nombre).strip('_').strip()
+    return nombre
+
+def _extraer_nombre_sede_de_archivo(nombre_raw: str) -> str:
+    """
+    Extrae el nombre útil de sede desde el nombre del archivo de datafono.
+    Maneja múltiples convenciones de nomenclatura:
+      - 'datafono_ENVIGADO'              → 'ENVIGADO'
+      - 'MOVIMIENTOS DATAFONO ENVIGADO'  → 'ENVIGADO'
+      - 'REDEBAN DATAFONO VIVA ENVIGADO' → 'VIVA ENVIGADO'
+      - 'ENVIGADO'                       → 'ENVIGADO'
+      - 'datafono_VIVA ENVIGADO'         → 'VIVA ENVIGADO'
+    Regla: si contiene la palabra DATAFONO, usar lo que viene DESPUÉS.
+    Si no, quitar prefijo 'datafono_' y usar el resto.
+    """
+    n = nombre_raw.strip().upper()
+    # Caso 1: contiene la palabra DATAFONO → extraer lo que viene después
+    m = re.search(r'\bDATAFONO\b\s+(.+)', n, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # Caso 2: prefijo datafono_ (con guion bajo)
+    n = re.sub(r'^DATAFONO[_\s]+', '', n, flags=re.IGNORECASE)
+    # Caso 3: prefijos operativos conocidos que no aportan al nombre de sede
+    for prefijo in [r'^MOVIMIENTOS\s+', r'^REPORTE\s+', r'^REDEBAN\s+',
+                    r'^CREDIBANCO\s+', r'^INFORME\s+', r'^DETALLE\s+']:
+        n = re.sub(prefijo, '', n, flags=re.IGNORECASE)
+    return n.strip()
+
 def cargar_multiples_datafonos(archivos: list) -> tuple:
     """Retorna (df_unificado, info_archivos{nombre: {path,filas}})"""
     frames, info = [], {}
     for arch in archivos:
-        nombre = re.sub(r'^datafono_', '',
-                        os.path.splitext(os.path.basename(arch))[0],
-                        flags=re.IGNORECASE).upper()
+        nombre = _normalizar_nombre_archivo(arch)
         try:
             df = leer_datafono(arch)
             df['_Nombre_Archivo'] = nombre
@@ -405,6 +444,99 @@ def cruzar_auxiliar_datafono(df_aux, por_dia, por_bolruta,
         resultados.append({'row_aux': ra, 'candidatos_bolruta': cands,
                             'suma_grupos': s_gr, 'diferencia': dif,
                             'estado': estado, 'valor_aux': v_aux})
+    return resultados
+
+
+def agrupar_datafono_por_abono(df_dat: pd.DataFrame) -> tuple:
+    """
+    Agrupa el datafono por Fecha de ABONO (en lugar de Fecha Vale).
+    Usado exclusivamente en el modo de conciliación por Fecha de Abono
+    para períodos históricos donde WorldOffice registró por fecha de abono.
+
+    Retorna:
+      por_abono   — agrupado por (archivo, año_abono, mes_abono, dia_abono)
+      por_bolruta — detalle por bol_ruta con Fecha Vale como referencia informativa
+    """
+    df = df_dat.copy()
+    df['_Dia_Abono']  = df['Fecha de Abono'].dt.day
+    df['_Mes_Abono']  = df['Fecha de Abono'].dt.month
+    df['_Year_Abono'] = df['Fecha de Abono'].dt.year
+
+    agg = {'Valor Neto': 'sum'}
+    for col in ['Valor Comisión', 'Ret. Fuente', 'Ret. IVA', 'Ret. ICA']:
+        if col in df.columns:
+            agg[col] = 'sum'
+
+    por_abono = df.groupby(
+        ['_Nombre_Archivo', '_Year_Abono', '_Mes_Abono', '_Dia_Abono'], dropna=False
+    ).agg(agg).reset_index()
+
+    # Detalle por bol_ruta — Fecha Vale es solo informativa en este modo
+    por_bolruta = df.groupby(
+        ['_Nombre_Archivo', '_Year_Abono', '_Mes_Abono', '_Dia_Abono', 'Fecha Vale', 'Bol. Ruta'],
+        dropna=False
+    ).agg({'Valor Neto': 'sum'}).reset_index()
+
+    return por_abono, por_bolruta
+
+
+def cruzar_auxiliar_datafono_por_abono(df_aux, por_abono, por_bolruta,
+                                        nombre_archivo: str,
+                                        year: int = 2025, mes: int = 1) -> list:
+    """
+    Cruza el auxiliar contra el datafono usando Fecha de Abono como clave.
+
+    Regla: auxiliar.Dia_Operacion == datafono.Fecha_Abono.day
+           para el mismo mes y año del período conciliado.
+
+    Registros cuya nota indica un mes distinto al período (ej: nota '01/02/2025'
+    en el auxiliar de enero) quedan como SIN_MATCH — son registros de cierre de
+    mes que contabilidad incluyó anticipadamente y no pertenecen al período.
+
+    ADVERTENCIA NORMATIVA: Este modo es contablemente incorrecto según NIIF PYMES
+    (principio de devengo). Usar únicamente para conciliación de períodos históricos
+    donde el auxiliar fue registrado por Fecha de Abono. Requiere nota en el informe.
+    """
+    resultados = []
+    for _, ra in df_aux.iterrows():
+        dia   = ra['Dia_Operacion']
+        v_aux = float(ra['Debitos'])
+
+        if pd.isna(dia):
+            resultados.append({'row_aux': ra, 'candidatos_bolruta': pd.DataFrame(),
+                                'suma_grupos': 0, 'diferencia': v_aux,
+                                'estado': 'SIN_DIA', 'valor_aux': v_aux,
+                                'modo_cruce': 'FECHA_ABONO'})
+            continue
+
+        dia = int(dia)
+
+        match_abono = por_abono[
+            (por_abono['_Nombre_Archivo'].str.upper() == nombre_archivo.upper()) &
+            (por_abono['_Dia_Abono']  == dia)  &
+            (por_abono['_Year_Abono'] == year) &
+            (por_abono['_Mes_Abono']  == mes)
+        ]
+
+        s_gr = float(match_abono['Valor Neto'].sum()) if len(match_abono) > 0 else 0.0
+        dif  = v_aux - s_gr
+
+        cands = por_bolruta[
+            (por_bolruta['_Nombre_Archivo'].str.upper() == nombre_archivo.upper()) &
+            (por_bolruta['_Dia_Abono']  == dia)  &
+            (por_bolruta['_Year_Abono'] == year) &
+            (por_bolruta['_Mes_Abono']  == mes)
+        ].copy()
+
+        if len(match_abono) == 0:    estado = 'SIN_MATCH'
+        elif abs(dif) < 1:           estado = 'CUADRA'
+        elif abs(dif) <= v_aux*0.05: estado = 'DIF_MENOR'
+        else:                        estado = 'DIFERENCIA'
+
+        resultados.append({'row_aux': ra, 'candidatos_bolruta': cands,
+                            'suma_grupos': s_gr, 'diferencia': dif,
+                            'estado': estado, 'valor_aux': v_aux,
+                            'modo_cruce': 'FECHA_ABONO'})
     return resultados
 
 
@@ -499,11 +631,19 @@ def _hoja_detalle(wb, resultados, sede, periodo, ws_name="DETALLE_CONCILIACION")
                 com_ret = sum(float(gr[c]) for c in
                               ['Valor Comisión','Ret. Fuente','Ret. IVA','Ret. ICA']
                               if c in gr.index and pd.notna(gr[c]))
-                fa = gr['Fecha de Abono']
-                try: dias_ab = (fa - gr.get('Fecha Vale', fa)).days if pd.notna(fa) else '?'
-                except: dias_ab = '?'
+                # Fecha de Abono puede no existir en modo FECHA_ABONO (el bolruta
+                # se agrupa por Fecha Vale como referencia informativa en ese modo)
+                fa = gr['Fecha de Abono'] if 'Fecha de Abono' in gr.index else None
+                fv = gr['Fecha Vale']     if 'Fecha Vale'     in gr.index else None
+                try:
+                    dias_ab = (fa - fv).days if (fa is not None and fv is not None
+                                                 and pd.notna(fa) and pd.notna(fv)) else '?'
+                except Exception:
+                    dias_ab = '?'
+                fa_display = fa.date() if (fa is not None and pd.notna(fa)) else (
+                             fv.date() if (fv is not None and pd.notna(fv)) else None)
                 vals_gr = ["GRUPO_BOL_RUTA",None,None,None,None,None,None,None,None,
-                            fa.date() if pd.notna(fa) else None,
+                            fa_display,
                             str(gr['Bol. Ruta']), gr['Valor Neto'],
                             com_ret if com_ret>0 else None, None, f"Abono D+{dias_ab}"]
                 fmts_gr   = [None]*9+[FMT_DATE,None,FMT_COP,FMT_COP,None,None]
@@ -753,7 +893,7 @@ def _hoja_mapa_nombres(wb, mapa_nombres, huerfanos):
 # ════════════════════════════════════════════════════════════════════════════
 
 def _hoja_auditoria(wb, sede, periodo, info_match=None, es_consolidado=False,
-                    mapa_nombres=None, huerfanos=None):
+                    mapa_nombres=None, huerfanos=None, modo_fecha='FECHA_VALE'):
     ws = wb.create_sheet("LOG_AUDITORIA")
     ws.column_dimensions['A'].width = 40
     ws.column_dimensions['B'].width = 66
@@ -767,23 +907,37 @@ def _hoja_auditoria(wb, sede, periodo, info_match=None, es_consolidado=False,
         f"{info_match.get('nombre_archivo','')} → {sede} | "
         f"score={info_match['score']:.0f} | tipo={info_match['tipo']}")
 
+    if modo_fecha == 'FECHA_ABONO':
+        logica_cruce  = "Nota.Dia_Operacion == Fecha_Abono.day (mismo mes y año) — MODO HISTÓRICO"
+        agrupacion_df = "Por día Fecha de Abono → SUM(Valor Neto)"
+        advertencia   = ("⚠ MODO FECHA ABONO — Criterio no estándar NIIF. Usado para períodos "
+                         "históricos donde el auxiliar fue registrado por fecha de abono. "
+                         "No usar para períodos corrientes.")
+    else:
+        logica_cruce  = "Nota.Dia_Operacion == Fecha_Vale.day (mismo mes y año)"
+        agrupacion_df = "Por día Fecha Vale → SUM(Valor Neto)"
+        advertencia   = None
+
     registros = [
         ("Fecha / Hora proceso",          datetime.now().strftime('%d/%m/%Y %H:%M:%S')),
         ("Sede / Modo",                   sede if not es_consolidado else "Consolidado — todas las sedes"),
         ("Período",                       periodo),
-        ("Versión motor",                 "1.4.0"),
+        ("Versión motor",                 "1.5.1"),
+        ("Modo de cruce de fechas",       modo_fecha),
         ("Normativa",                     "NIIF para PYMES (Decreto 2420 de 2015) / DIAN Colombia"),
-        ("Lógica de cruce",               "Nota.Dia_Operacion == Fecha_Vale.day (mismo mes y año)"),
+        ("Lógica de cruce",               logica_cruce),
         ("Matching de nombres",           match_txt if not es_consolidado else
                                           f"Exactos: {sedes_exactas} | Difusos: {sedes_difusas} | Huérfanos: {len(huerfanos or [])}"),
         ("Umbral match difuso",           f"{UMBRAL_MATCH}/100"),
-        ("Agrupación datafono",           "Por día Fecha Vale → SUM(Valor Neto)"),
+        ("Agrupación datafono",           agrupacion_df),
         ("Detalle bancario",              "Por (Fecha Abono + Bol_Ruta) → SUM(Valor Neto)"),
         ("Tolerancia diferencia menor",   "≤ 5% del valor auxiliar"),
         ("Anti-duplicado hojas xlsx",     "Si >80% días con totales idénticos → usa hoja principal"),
         ("Archivos originales",           "NO modificados — motor opera sobre copias en memoria"),
         ("Auditoría externa",             "KPMG Ltda. — Davivienda Cuenta Corriente 2346"),
     ]
+    if advertencia:
+        registros.append(("⚠ ADVERTENCIA NORMATIVA", advertencia))
     if es_consolidado and huerfanos:
         registros.append(("Huérfanos — lista completa", " | ".join(huerfanos)))
 
@@ -956,7 +1110,8 @@ def generar_excel_resultado(resultados: list, sede_nombre: str,
                              info_match: dict = None,
                              por_dia=None, por_bolruta=None,
                              nombre_archivo: str = "",
-                             year: int = 2026, mes: int = 1) -> str:
+                             year: int = 2026, mes: int = 1,
+                             modo_fecha: str = 'FECHA_VALE') -> str:
     """Genera Excel individual para una sede."""
     wb = Workbook()
     _hoja_resumen_individual(wb, resultados, sede_nombre, periodo, info_match)
@@ -964,7 +1119,7 @@ def generar_excel_resultado(resultados: list, sede_nombre: str,
     if por_dia is not None and nombre_archivo:
         _hoja_pendientes(wb, resultados, por_dia, por_bolruta,
                          nombre_archivo, year, mes, sede_nombre)
-    _hoja_auditoria(wb, sede_nombre, periodo, info_match)
+    _hoja_auditoria(wb, sede_nombre, periodo, info_match, modo_fecha=modo_fecha)
     if "Sheet" in wb.sheetnames: del wb["Sheet"]
     wb.save(output_path)
     return output_path
@@ -974,7 +1129,8 @@ def generar_excel_unificado(resultados_por_sede: list,
                              output_path: str,
                              periodo: str,
                              mapa_nombres: dict,
-                             huerfanos: list) -> str:
+                             huerfanos: list,
+                             modo_fecha: str = 'FECHA_VALE') -> str:
     """
     Genera un único Excel con todas las sedes.
     resultados_por_sede: [{'sede', 'nombre_archivo', 'resultados', 'info_match'}]
@@ -997,7 +1153,6 @@ def generar_excel_unificado(resultados_por_sede: list,
             'diferencia': sum(r['valor_aux']   for r in res) - sum(r['suma_grupos'] for r in res),
             'score':      item.get('info_match',{}).get('score',0),
             'tipo_match': item.get('info_match',{}).get('tipo','—'),
-            'nombre_df':  item['nombre_archivo'],
         })
 
     _hoja_resumen_ejecutivo(wb, resumen_sedes, huerfanos, periodo)
@@ -1006,7 +1161,6 @@ def generar_excel_unificado(resultados_por_sede: list,
     for item in resultados_por_sede:
         nombre_hoja = item['sede'][:28].strip()
         _hoja_detalle(wb, item['resultados'], item['sede'], periodo, ws_name=nombre_hoja)
-        pend_name = f"PDTE_{item['sede'][:22].strip()}"
         _hoja_pendientes(wb, item['resultados'],
                          item.get('por_dia', pd.DataFrame()),
                          item.get('por_bolruta', pd.DataFrame()),
@@ -1015,7 +1169,8 @@ def generar_excel_unificado(resultados_por_sede: list,
                          item['sede'])
 
     _hoja_auditoria(wb, "Consolidado", periodo, es_consolidado=True,
-                    mapa_nombres=mapa_nombres, huerfanos=huerfanos)
+                    mapa_nombres=mapa_nombres, huerfanos=huerfanos,
+                    modo_fecha=modo_fecha)
 
     if "Sheet" in wb.sheetnames: del wb["Sheet"]
     wb.save(output_path)
