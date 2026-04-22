@@ -1,6 +1,6 @@
 # REGLAS DE CONCILIACIÓN DE DATAFONOS
 ## GIRALDO GIRALDO JAIME WILSON — Cuenta Corriente 2346 Davivienda
-**Motor:** `conciliador_engine.py` | **Versión:** 1.5 | **Normativa:** NIIF PYMES / DIAN Colombia
+**Motor:** `conciliador_engine.py` | **Versión:** 1.6 | **Normativa:** NIIF PYMES / DIAN Colombia
 
 ---
 
@@ -32,17 +32,37 @@
 
 ## 3. REGLA PRINCIPAL DE CRUCE
 
+El sistema soporta dos criterios de cruce. La auxiliar contable selecciona el criterio
+según cómo registró las operaciones en WorldOffice para el período a conciliar.
+
+### Criterio A — Fecha Vale (NIIF estándar)
 ```
 auxiliar.Dia_Operacion == datafono.Fecha_Vale.day
 ```
+- Usar cuando la Nota del auxiliar contiene la **fecha en que ocurrió la venta**.
+- Consistente con NIIF PYMES (principio de devengo: el ingreso se reconoce cuando ocurre la transacción).
+- El auxiliar registra la venta el mismo día que el cliente pagó.
+
+### Criterio B — Fecha de Abono
+```
+auxiliar.Dia_Operacion == datafono.Fecha_Abono.day
+```
+- Usar cuando la Nota del auxiliar contiene la **fecha en que el banco acreditó el dinero**.
+- La auxiliar tomó la fecha de abono del extracto del datafono para registrar en WorldOffice.
+- Válido operativamente cuando la empresa decide registrar por fecha de acreditación bancaria.
 
 **Para la misma sede, mismo mes y mismo año.**
 
-- El valor que se compara es `auxiliar.Debitos` vs `SUM(datafono.Valor_Neto)` del día.
-- El datafono se agrupa: todos los registros del mismo archivo (sede) + mismo día de `Fecha Vale` → suma de `Valor Neto`.
+- El valor que se compara siempre es `auxiliar.Debitos` vs `SUM(datafono.Valor_Neto)`.
+- El criterio seleccionado queda registrado en el `LOG_AUDITORIA` del informe.
+- La selección del criterio la hace la auxiliar contable desde la interfaz antes de ejecutar.
 
-> **NUNCA** se usa la columna `Fecha` del auxiliar para extraer el día de operación.  
-> **NUNCA** se usa `Fecha de Abono` como criterio de cruce principal.
+> **REGLA DE CONSISTENCIA:** El criterio debe ser uniforme en todo el período conciliado.
+> No mezclar Fecha Vale y Fecha de Abono en el mismo mes. Si el auxiliar tiene registros
+> con ambos criterios, reportar antes de continuar.
+
+> El campo `Fecha` del auxiliar WorldOffice **no se usa en ningún cálculo**.
+> El día de operación siempre se extrae del campo `Nota`.
 
 ---
 
@@ -52,27 +72,45 @@ auxiliar.Dia_Operacion == datafono.Fecha_Vale.day
 |---|---|---|
 | ¿Qué es? | Fecha en que el cliente pagó con tarjeta | Fecha en que el banco acreditó el dinero |
 | ¿Cuándo ocurre? | El mismo día de la venta | D+1 a D+3 (días hábiles después) |
-| ¿Dónde la usa el sistema? | **Cruce principal** auxiliar vs. datafono | Solo informativo (detalle Bol. Ruta) |
+| ¿Cuándo usarlo? | Cuando el auxiliar registra por fecha de venta | Cuando el auxiliar registra por fecha de acreditación bancaria |
 
-**Por qué Fecha Vale y no Fecha de Abono:**
-1. El auxiliar WorldOffice registra la venta en la fecha de la transacción (principio de devengo NIIF).
-2. Con Fecha de Abono los últimos días del mes quedan sin cruce (el abono cae en el mes siguiente).
-3. Los abonos agrupados (varios días en un solo abono) generan ambigüedad irresoluble.
-4. Los festivos y fines de semana producen diferencias artificiales si se usa Fecha de Abono.
+### Consideraciones operativas de cada criterio
 
-**Fecha de Abono** se usa únicamente para:
-- Mostrar el campo `Abono D+N` en el detalle del informe.
-- Conciliación bancaria (proceso separado, fuera del alcance de este sistema).
+**Criterio Fecha Vale:**
+- Consistente con NIIF PYMES (el ingreso se reconoce cuando ocurre la transacción).
+- Los cierres de mes cuadran dentro del mismo período (la venta del 31 cuadra en el período del 31).
+- No genera diferencias artificiales en festivos ni fines de semana.
+
+**Criterio Fecha de Abono:**
+- Útil cuando la empresa registra contablemente por la fecha de acreditación bancaria.
+- Los últimos 1-3 días del mes pueden quedar sin cruce (el abono cae en el mes siguiente).
+- Si un abono agrupa varios días de venta, puede generar `SIN_MATCH` si el auxiliar registra día a día.
+- El `LOG_AUDITORIA` registra el criterio utilizado en cada proceso para trazabilidad.
+
+### Regla de consistencia (obligatoria)
+El criterio seleccionado debe ser **uniforme en todo el período**: si el auxiliar registró
+enero bajo Fecha Vale, todo enero debe conciliarse con Fecha Vale. Si gerencia cambia
+el criterio de registro a partir de un mes, ese mes se concilia con el nuevo criterio
+y se documenta el cambio en el log de auditoría.
+
+### ¿Cuándo usa el sistema Fecha de Abono sin ser criterio de cruce?
+La `Fecha de Abono` aparece siempre en el informe como dato informativo:
+- Campo `Abono D+N` en el detalle del informe (cuántos días tardó el abono).
+- Base para la conciliación bancaria (proceso separado, fuera del alcance de este sistema).
 
 ---
 
 ## 5. EXTRACCIÓN DEL DÍA DE OPERACIÓN DESDE LA NOTA
 
-El día se extrae del campo `Nota` del auxiliar. Se prueban los siguientes patrones **en orden de prioridad**:
+El sistema extrae el día del campo `Nota` con los mismos patrones independientemente
+del criterio de cruce seleccionado. Lo que cambia entre criterios es **qué representa ese día**
+(fecha de venta o fecha de abono) y contra qué columna del datafono se compara.
+
+Se prueban los siguientes patrones **en orden de prioridad**:
 
 | Prioridad | Patrón | Ejemplo de Nota | Día extraído |
 |---|---|---|---|
-| 1 | Fecha completa `dd/mm/aaaa` o `dd-mm-aaaa` | `"01/03/2025 DATAFONO"` | 1 |
+| 1 | Fecha completa `dd/mm/aaaa` o `dd-mm-aaaa` | `"01/03/2026 DATAFONO"` | 1 |
 | 2 | Fecha parcial `dd/mm` o `dd-mm` | `"15/03 DATAFONO"` | 15 |
 | 3 | Número al inicio seguido de `-` o espacio | `"2- DATAFONO ENVIGADO"` | 2 |
 | 4 | Cualquier número válido 1-31 en el texto | `"DATAFONO DIA 7"` | 7 |
@@ -83,21 +121,31 @@ Si ningún patrón extrae un día → estado `SIN_DIA`.
 
 ## 6. DETECCIÓN DE FORMATO DEL AUXILIAR (por fila)
 
-El sistema detecta el formato **fila por fila** (un mismo auxiliar puede mezclar ambos):
+El sistema detecta el formato **fila por fila**. Un mismo auxiliar puede mezclar formatos.
 
-### Formato NUEVO (Enero 2026 en adelante)
+### Formato ESTÁNDAR (vigente desde Marzo 2026 en adelante)
+- La `Nota` contiene la fecha completa + `DATAFONO`. Sin nombre de sede en la Nota.
+- La fecha en Nota puede ser Fecha Vale o Fecha de Abono — depende del criterio de registro adoptado.
+- Ejemplo: `"01/03/2026 DATAFONO"`, `"15-03-2026 DATAFONO"`
+- **Sede:** se extrae del campo `Tercero`, limpiando prefijos.
+- **Día:** fecha extraída de la Nota.
+
+### Formato NUEVO (transitorio — Enero/Febrero 2026)
 - La `Nota` empieza con dígito(s) seguido de `-` o espacio + `DATAFONO` + nombre de sede.
 - Ejemplo: `"2- DATAFONO ENVIGADO"`, `"10 DATAFONO MOLINOS"`
 - **Sede:** se extrae de la Nota, lo que viene después de `DATAFONO`.
 - **Día:** número al inicio de la Nota.
 
-### Formato ANTIGUO (años anteriores)
-- La `Nota` contiene fecha completa o parcial + `DATAFONO`.
+### Formato ANTIGUO (años anteriores a 2026)
+- La `Nota` contiene fecha completa o parcial + `DATAFONO`. Sin nombre de sede en la Nota.
 - Ejemplo: `"01/03/2025 DATAFONO"`, `"15-03 DATAFONO"`
 - **Sede:** se extrae del campo `Tercero`, limpiando prefijos.
 - **Día:** fecha extraída de la Nota.
 
-### Limpieza del campo Tercero (formato antiguo)
+> **Nota técnica:** Los formatos ESTÁNDAR y ANTIGUO son estructuralmente idénticos para el motor.
+> El motor los procesa con la misma lógica — la distinción es solo documental para trazabilidad.
+
+### Limpieza del campo Tercero (formatos ESTÁNDAR y ANTIGUO)
 Se eliminan los siguientes prefijos del campo `Tercero` (sin quitar el resto del nombre):
 - `CLIENTES VENTAS `
 - `CLIENTES VENTA `
@@ -257,5 +305,6 @@ Cada informe incluye una hoja `LOG_AUDITORIA` con:
 
 ---
 
-*Documento generado desde `conciliador_engine.py` v1.5 + `app_conciliador.py` v1.4*  
-*GIRALDO GIRALDO JAIME WILSON — Uso interno — Confidencial*
+*Documento generado desde `conciliador_engine.py` v1.6 + `app_conciliador.py` v1.5*  
+*GIRALDO GIRALDO JAIME WILSON — Uso interno — Confidencial*  
+*Actualizado: Abril 2026 — v1.6: criterio de cruce configurable (Fecha Vale / Fecha de Abono)*

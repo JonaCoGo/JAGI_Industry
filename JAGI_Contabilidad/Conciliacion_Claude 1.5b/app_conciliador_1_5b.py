@@ -2,7 +2,7 @@
 Interfaz Gráfica — Sistema de Conciliación de Datafonos  v1.4
 Tkinter · Compatible Windows / Mac / Linux
 
-NUEVO en v1.4:
+NUEVO en v1.5b:
   • Coincidencia difusa de nombres (AMERICAS → PLAZA DE LAS AMERICAS)
   • Aviso de archivos datafono huérfanos (sin sede en el auxiliar)
   • Tres modos de salida: individual | archivos separados | todo en un Excel
@@ -14,7 +14,7 @@ import threading, os, subprocess, sys
 from datetime import datetime
 from pathlib import Path
 
-from conciliador_engine import (
+from conciliador_engine_1_5b import (
     leer_auxiliar, sedes_disponibles,
     cargar_multiples_datafonos, construir_mapa_nombres,
     agrupar_datafono_por_dia_vale, cruzar_auxiliar_datafono,
