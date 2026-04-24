@@ -1,12 +1,15 @@
 """
-Interfaz Gráfica — Sistema de Conciliación de Datafonos  v1.4
+Interfaz Gráfica — Sistema de Conciliación de Datafonos  v1.6
 Tkinter · Compatible Windows / Mac / Linux
 
-NUEVO en v1.5b:
-  • Coincidencia difusa de nombres (AMERICAS → PLAZA DE LAS AMERICAS)
-  • Aviso de archivos datafono huérfanos (sin sede en el auxiliar)
-  • Tres modos de salida: individual | archivos separados | todo en un Excel
 """
+
+import sys
+from pathlib import Path
+
+if __name__ == "__main__" and __package__ is None:
+    BASE_DIR = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(BASE_DIR))
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -14,7 +17,7 @@ import threading, os, subprocess, sys
 from datetime import datetime
 from pathlib import Path
 
-from conciliador_engine_1_5b import (
+from conciliador_datafonos.conciliador_engine import (
     leer_auxiliar, sedes_disponibles,
     cargar_multiples_datafonos, construir_mapa_nombres,
     agrupar_datafono_por_dia_vale, cruzar_auxiliar_datafono,
@@ -37,9 +40,11 @@ MODO_UNI    = "unificado"
 class ConciliadorApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Conciliador de Datafonos — v1.5")
-        self.geometry("1000x780"); self.minsize(860,640)
+        self.title("JAGI CAPS — Conciliador de Datafonos v1.6")
+        self.geometry("1000x820"); self.minsize(860,680)
         self.configure(bg=C["bg"])
+        self._empresa_key = tk.StringVar(value="JAIME_WILSON")
+        self._cuenta_sel  = tk.StringVar(value="")
         self._auxiliar   = tk.StringVar()
         self._df_paths   = []
         self._out_dir    = tk.StringVar(value=str(Path.home()/"Desktop"))
@@ -79,7 +84,7 @@ class ConciliadorApp(tk.Tk):
             b.pack(fill="x")
             b.bind("<Enter>", lambda e,btn=b: btn.config(bg=C["accent"]))
             b.bind("<Leave>", lambda e,btn=b: btn.config(bg=C["sidebar"]))
-        tk.Label(sb, text="\nv1.5 | Colombia\nNIIF PYMES / DIAN\nMatch difuso\nFormatos multi-año",
+        tk.Label(sb, text="\nv1.6 | Colombia\nNIIF PYMES / DIAN\nMatch difuso\nFormatos multi-año",
                  bg=C["sidebar"], fg="#8899BB",
                  font=FS, justify="center").pack(side="bottom", pady=16)
 
@@ -129,12 +134,45 @@ class ConciliadorApp(tk.Tk):
     def _build_content(self):
         c = self._frame
 
-        # Banner
+        # Banner dinámico
         bn = tk.Frame(c, bg=C["accent"], height=74); bn.pack(fill="x")
         tk.Label(bn, text="Sistema de Conciliación de Datafonos",
-                 bg=C["accent"], fg="white", font=FT).pack(side="left", padx=24, pady=20)
-        tk.Label(bn, text="GIRALDO GIRALDO JAIME WILSON\nCuenta 2346 · Banco Davivienda",
-                 bg=C["accent"], fg="#CCE0F5", font=FS, justify="right").pack(side="right", padx=20)
+                bg=C["accent"], fg="white", font=FT).pack(side="left", padx=24, pady=20)
+        self._lbl_banner = tk.Label(bn, text="",
+                bg=C["accent"], fg="#CCE0F5", font=FS, justify="right")
+        self._lbl_banner.pack(side="right", padx=20)
+
+        # ── Sec 0: Empresa y Cuenta
+        s0 = self._sec(c, "🏢  0. Empresa y cuenta bancaria")
+        ef = tk.Frame(s0, bg=C["bg"]); ef.pack(fill="x", padx=24, pady=6)
+        tk.Label(ef, text="Razón social:", bg=C["bg"], fg=C["label"],
+                font=FB, width=18, anchor="w").pack(side="left")
+        from config.empresas import opciones_ui, cuentas_empresa, label_banner
+        self._opciones_empresa = opciones_ui()
+        combo_emp = ttk.Combobox(ef, textvariable=self._empresa_key,
+                                values=[k for _,k in self._opciones_empresa],
+                                state="readonly", width=20, font=FB)
+        # Mostrar labels en lugar de keys
+        self._labels_empresa = {k: lbl for lbl,k in self._opciones_empresa}
+        self._keys_empresa   = {lbl: k  for lbl,k in self._opciones_empresa}
+        combo_emp_display = ttk.Combobox(ef,
+            values=[lbl for lbl,_ in self._opciones_empresa],
+            state="readonly", width=44, font=FB)
+        combo_emp_display.set(self._opciones_empresa[0][0])
+        combo_emp_display.pack(side="left", padx=4)
+        combo_emp_display.bind("<<ComboboxSelected>>", lambda e: self._on_empresa(combo_emp_display))
+
+        cf = tk.Frame(s0, bg=C["bg"]); cf.pack(fill="x", padx=24, pady=4)
+        tk.Label(cf, text="Cuenta bancaria:", bg=C["bg"], fg=C["label"],
+                font=FB, width=18, anchor="w").pack(side="left")
+        self._combo_cuenta = ttk.Combobox(cf, textvariable=self._cuenta_sel,
+                                            state="readonly", width=28, font=FB)
+        self._combo_cuenta.pack(side="left", padx=4)
+        self._lbl_tipo_cuenta = tk.Label(cf, text="", bg=C["bg"], fg="#555555", font=FS)
+        self._lbl_tipo_cuenta.pack(side="left", padx=8)
+
+        # Inicializar con empresa default
+        self._on_empresa(combo_emp_display)
 
         # ── Sec 1: Archivos
         s1 = self._sec(c, "📂  1. Carga de archivos")
@@ -269,34 +307,57 @@ class ConciliadorApp(tk.Tk):
                  padx=12, pady=8).pack(anchor="w")
 
         # ── Modo de Fecha ─────────────────────────────────────────────────────
-        mf_frame = tk.LabelFrame(s2, text=" 📅  Modo de cruce de fechas ",
+        mf_frame = tk.LabelFrame(s2, text=" 📅  Criterio de cruce de fechas ",
                                   bg=C["bg"], fg=C["accent"], font=FH,
                                   padx=12, pady=10, relief="groove", bd=1)
         mf_frame.pack(fill="x", padx=24, pady=(0, 10))
 
+        tk.Label(mf_frame,
+                 text="Seleccione la fecha que la auxiliar contable usó al registrar las "
+                      "operaciones en WorldOffice:",
+                 bg=C["bg"], fg=C["label"], font=FS).pack(anchor="w", pady=(0, 8))
+
+        # Opción A — Fecha Vale
+        rb_vale_frame = tk.Frame(mf_frame, bg="#EFF6E0", relief="solid", bd=1)
+        rb_vale_frame.pack(fill="x", pady=(0, 6), ipady=4, ipadx=6)
         tk.Radiobutton(
-            mf_frame,
-            text="📅  Fecha Vale  (estándar NIIF — períodos corrientes)",
+            rb_vale_frame,
+            text="📅  Fecha Vale — fecha en que ocurrió la venta",
             variable=self._modo_fecha, value="FECHA_VALE",
             command=self._on_modo_fecha,
-            bg=C["bg"], fg=C["label"], activebackground=C["bg"],
+            bg="#EFF6E0", fg="#375623", activebackground="#EFF6E0",
             font=("Arial", 10, "bold"), cursor="hand2"
-        ).pack(anchor="w", pady=(0, 4))
+        ).pack(anchor="w", padx=8)
+        tk.Label(rb_vale_frame,
+                 text="La Nota del auxiliar contiene la fecha del día de la venta.  "
+                      "Criterio NIIF estándar (principio de devengo).  "
+                      "Ej: «01/03/2026 DATAFONO»",
+                 bg="#EFF6E0", fg="#375623", font=FS).pack(anchor="w", padx=28)
 
+        # Opción B — Fecha de Abono
+        rb_abono_frame = tk.Frame(mf_frame, bg="#EFF4FB", relief="solid", bd=1)
+        rb_abono_frame.pack(fill="x", pady=(0, 4), ipady=4, ipadx=6)
         tk.Radiobutton(
-            mf_frame,
-            text="🗓  Fecha de Abono  (histórico — año 2025, WorldOffice registrado por fecha de abono)",
+            rb_abono_frame,
+            text="🏦  Fecha de Abono — fecha en que el banco acreditó el dinero",
             variable=self._modo_fecha, value="FECHA_ABONO",
             command=self._on_modo_fecha,
-            bg=C["bg"], fg=C["label"], activebackground=C["bg"],
-            font=FB, cursor="hand2"
-        ).pack(anchor="w")
+            bg="#EFF4FB", fg="#1F3864", activebackground="#EFF4FB",
+            font=("Arial", 10, "bold"), cursor="hand2"
+        ).pack(anchor="w", padx=8)
+        tk.Label(rb_abono_frame,
+                 text="La Nota del auxiliar contiene la fecha de abono bancario (D+1 a D+3).  "
+                      "El sistema cruzará ese día contra la Fecha de Abono del reporte datafono.  "
+                      "Ej: «03/03/2026 DATAFONO» (venta del 01/03, abono el 03/03).",
+                 bg="#EFF4FB", fg="#1F3864", font=FS).pack(anchor="w", padx=28)
 
+        # Label informativo dinámico
         self._lbl_aviso_fecha = tk.Label(
             mf_frame, text="",
-            bg=C["bg"], fg="#843C0C", font=FS,
+            bg=C["bg"], fg="#1F3864", font=FS,
             justify="left", wraplength=700)
-        self._lbl_aviso_fecha.pack(anchor="w", pady=(4, 0))
+        self._lbl_aviso_fecha.pack(anchor="w", pady=(6, 0))
+        self._on_modo_fecha()   # inicializar texto al arrancar
 
         # ── Sec 3: Ejecutar
         s3 = self._sec(c, "▶  3. Ejecutar conciliación")
@@ -333,14 +394,52 @@ class ConciliadorApp(tk.Tk):
             self._p_todos.pack(fill="x", padx=24, pady=(0,4))
 
     def _on_modo_fecha(self):
-        if self._modo_fecha.get() == "FECHA_ABONO":
+        modo = self._modo_fecha.get()
+        if modo == "FECHA_ABONO":
             self._lbl_aviso_fecha.config(
-                text="⚠  MODO HISTÓRICO — El cruce usará Fecha de Abono del datafono. "
-                     "El LOG_AUDITORIA registrará que este criterio no sigue NIIF estándar. "
-                     "Usar solo para períodos donde WorldOffice fue registrado por fecha de abono "
-                     "(ej: año 2025 excepto marzo).")
+                fg="#1F3864",
+                text="ℹ  Modo Fecha de Abono activo.  El cruce comparará el día de la Nota del auxiliar "
+                     "contra la Fecha de Abono del reporte datafono.  "
+                     "El LOG_AUDITORIA registrará el criterio utilizado.  "
+                     "Asegúrese de que TODAS las notas del período corresponden al día de abono bancario.")
         else:
-            self._lbl_aviso_fecha.config(text="")
+            self._lbl_aviso_fecha.config(
+                fg="#375623",
+                text="ℹ  Modo Fecha Vale activo.  El cruce comparará el día de la Nota del auxiliar "
+                     "contra la Fecha Vale del reporte datafono (fecha real de la venta).")
+            
+    def _on_empresa(self, combo_display=None):
+        from config.empresas import EMPRESAS, label_banner, cuentas_empresa
+        # Obtener key desde el label seleccionado
+        lbl_sel = combo_display.get() if combo_display else self._opciones_empresa[0][0]
+        key = self._keys_empresa.get(lbl_sel, "JAIME_WILSON")
+        self._empresa_key.set(key)
+
+        # Actualizar banner
+        emp = EMPRESAS[key]
+        self._lbl_banner.config(
+            text=f"{emp['razon_social']}\nCuenta: {emp['cuenta_default']}"
+        )
+
+        # Actualizar combo cuentas
+        cuentas = cuentas_empresa(key)
+        self._combo_cuenta["values"] = cuentas
+        self._combo_cuenta.set(emp["cuenta_default"])
+        self._actualizar_label_cuenta()
+
+    def _actualizar_label_cuenta(self):
+        from config.empresas import EMPRESAS
+        key  = self._empresa_key.get()
+        csel = self._cuenta_sel.get()
+        info = EMPRESAS[key]["cuentas"].get(csel, {})
+        tipo = info.get("tipo", "")
+        banco = info.get("banco", "")
+        self._lbl_tipo_cuenta.config(text=f"{banco} · {tipo}" if banco else "")
+        # Actualizar también el banner con la cuenta seleccionada
+        emp  = EMPRESAS[key]
+        self._lbl_banner.config(
+            text=f"{emp['razon_social']}\nCuenta: {csel}"
+        )
 
     # ── Acciones ─────────────────────────────────────────────────────────────
 
@@ -454,11 +553,18 @@ class ConciliadorApp(tk.Tk):
 
             self._set_prog(80,"Generando Excel…")
             ts   = datetime.now().strftime("%Y%m%d_%H%M")
-            name = f"CONCILIACION_DF_{sede_aux}_{ts}.xlsx"
+            from config.empresas import EMPRESAS
+            emp_key   = self._empresa_key.get()
+            emp_corto = EMPRESAS[emp_key]["nombre_corto"].replace(" ", "_")
+            name = f"CONCILIACION_DF_{emp_corto}_{sede_aux}_{ts}.xlsx"
             out  = os.path.join(self._out_dir.get(), name)
             info_match = {**info, 'nombre_archivo': sede_req}
             generar_excel_resultado(resultados, sede_aux, out, self._periodo.get(),
-                                    info_match, modo_fecha=modo_fecha)
+                                    info_match,
+                                    por_dia=por_dia, por_bolruta=por_bolruta,
+                                    nombre_archivo=nombre_arch,
+                                    year=year, mes=mes,
+                                    modo_fecha=modo_fecha)
             self._last_out = out; self._last_dir = self._out_dir.get()
             self._set_prog(100,f"✔ {name}")
             self._log(f"✔ {out}")
@@ -469,9 +575,10 @@ class ConciliadorApp(tk.Tk):
                 f"Archivo:\n{out}"))
         except Exception as exc:
             import traceback
-            self._log(f"❌ {exc}\n{traceback.format_exc()}")
-            self._set_prog(0,f"Error: {str(exc)[:60]}")
-            self.after(0,lambda: messagebox.showerror("Error",str(exc)))
+            msg = str(exc)
+            self._log(f"❌ {msg}\n{traceback.format_exc()}")
+            self._set_prog(0, f"Error: {msg[:60]}")
+            self.after(0, lambda m=msg: messagebox.showerror("Error", m))
         finally:
             self.after(0,lambda: self._btn_ej.config(state="normal"))
 
@@ -520,7 +627,10 @@ class ConciliadorApp(tk.Tk):
 
             ts = datetime.now().strftime("%Y%m%d_%H%M")
             if modo == MODO_SEP:
-                out_dir = os.path.join(self._out_dir.get(), f"CONCILIACION_TODOS_{ts}")
+                from config.empresas import EMPRESAS
+                emp_key   = self._empresa_key.get()
+                emp_corto = EMPRESAS[emp_key]["nombre_corto"].replace(" ", "_")
+                out_dir   = os.path.join(self._out_dir.get(), f"CONCILIACION_DF_{emp_corto}_{ts}")
                 os.makedirs(out_dir, exist_ok=True)
                 self._last_dir = out_dir
 
@@ -554,7 +664,9 @@ class ConciliadorApp(tk.Tk):
                 info_match = {**info, 'nombre_archivo': nombre_arch}
                 resultados_por_sede.append({
                     'sede': sede_aux, 'nombre_archivo': nombre_arch,
-                    'resultados': resultados, 'info_match': info_match
+                    'resultados': resultados, 'info_match': info_match,
+                    'por_dia': por_dia, 'por_bolruta': por_bolruta,
+                    'year': year, 'mes': mes,
                 })
                 resumen_sedes.append({
                     'sede': sede_aux, 'nombre_df': nombre_arch,
@@ -572,6 +684,9 @@ class ConciliadorApp(tk.Tk):
                     out_xlsx = os.path.join(out_dir, f"DF_{sede_aux}.xlsx")
                     generar_excel_resultado(resultados, sede_aux, out_xlsx,
                                              self._periodo.get(), info_match,
+                                             por_dia=por_dia, por_bolruta=por_bolruta,
+                                             nombre_archivo=nombre_arch,
+                                             year=year, mes=mes,
                                              modo_fecha=modo_fecha)
 
             self._set_prog(88,"Generando archivo(s) de salida…")
@@ -583,8 +698,7 @@ class ConciliadorApp(tk.Tk):
                 self._last_out = res_path
                 self._log(f"✔ {len(resultados_por_sede)} Excel individuales + resumen en {out_dir}")
             else:
-                out_file = os.path.join(self._out_dir.get(),
-                                         f"CONCILIACION_UNIFICADA_{ts}.xlsx")
+                out_file = os.path.join(self._out_dir.get(), f"CONCILIACION_DF_{emp_corto}_UNIFICADA_{ts}.xlsx")
                 generar_excel_unificado(resultados_por_sede, out_file,
                                          self._periodo.get(), mapa, huerfanos,
                                          modo_fecha=modo_fecha)
@@ -614,9 +728,10 @@ class ConciliadorApp(tk.Tk):
 
         except Exception as exc:
             import traceback
-            self._log(f"❌ {exc}\n{traceback.format_exc()}")
-            self._set_prog(0,f"Error: {str(exc)[:60]}")
-            self.after(0,lambda: messagebox.showerror("Error",str(exc)))
+            msg = str(exc)
+            self._log(f"❌ {msg}\n{traceback.format_exc()}")
+            self._set_prog(0, f"Error: {msg[:60]}")
+            self.after(0, lambda m=msg: messagebox.showerror("Error", m))
         finally:
             self.after(0,lambda: self._btn_ej.config(state="normal"))
 

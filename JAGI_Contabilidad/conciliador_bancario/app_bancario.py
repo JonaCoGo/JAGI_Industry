@@ -1,5 +1,5 @@
 """
-Interfaz Gráfica — Conciliación Bancaria JAGI CAPS v1.0
+Interfaz Gráfica — Conciliación Bancaria JAGI CAPS v1.2
 Tkinter · Compatible Windows / Mac / Linux
 Cruza Auxiliar WorldOffice ↔ Extracto Bancario
 """
@@ -28,7 +28,7 @@ FB = ("Arial",10);        FS = ("Arial",9)
 class ConciliacionBancariaApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("JAGI CAPS — Conciliación Bancaria v1.0")
+        self.title("JAGI CAPS — Conciliación Bancaria v1.2")
         self.geometry("960x740"); self.minsize(820,600)
         self.configure(bg=C["bg"])
 
@@ -71,7 +71,7 @@ class ConciliacionBancariaApp(tk.Tk):
             b.pack(fill="x")
             b.bind("<Enter>", lambda e, btn=b: btn.config(bg=C["accent"]))
             b.bind("<Leave>", lambda e, btn=b: btn.config(bg=C["sidebar"]))
-        tk.Label(sb, text="\nv1.0 | JAGI CAPS\nNIIF PYMES / DIAN\nAuxiliar ↔ Extracto",
+        tk.Label(sb, text="\nv1.2 | JAGI CAPS\nNIIF PYMES / DIAN\nAuxiliar ↔ Extracto",
                  bg=C["sidebar"], fg="#8899BB",
                  font=FS, justify="center").pack(side="bottom", pady=16)
 
@@ -291,10 +291,17 @@ class ConciliacionBancariaApp(tk.Tk):
             self._set_prog(60, "Cruzando auxiliar ↔ extracto…")
             resultado = cruzar_auxiliar_extracto(df_aux, df_ext, year, mes)
             res       = resultado['resumen']
-            self._log(f"Resultado: {res['cuadra']} cuadran | "
-                      f"{res['dif_menor']} dif.menor | "
+            self._log(f"Datáfonos retirados: {res['datafonos_retirados']} movimientos "
+                      f"(${res['datafonos_valor']:,.0f})")
+            self._log(f"Cruce general: {res['cuadra']} cuadran | "
+                      f"{res['dif_menor']} dif.≤1% | "
                       f"{res['sin_match']} sin match | "
                       f"{res['solo_banco']} solo en banco")
+            self._log(f"Nómina — {res['nom_fechas']} fechas: "
+                      f"{res['nom_cuadra']} cuadran | "
+                      f"{res['nom_dif']} con dif. | "
+                      f"{res['nom_sin_match']} sin match | "
+                      f"dif. neta: ${res['nom_diferencia']:,.0f}")
 
             self._set_prog(80, "Generando Excel…")
             ts      = datetime.now().strftime("%Y%m%d_%H%M")
@@ -311,11 +318,21 @@ class ConciliacionBancariaApp(tk.Tk):
             self.after(0, lambda: messagebox.showinfo(
                 "Completado",
                 f"✔ Conciliación bancaria finalizada\n\n"
-                f"  Cuadran:      {res['cuadra']}\n"
-                f"  Dif. menor:   {res['dif_menor']}\n"
-                f"  Sin match:    {res['sin_match']}\n"
-                f"  Solo en banco:{res['solo_banco']}\n"
-                f"  Dif. neta:    ${res['diferencia_neta']:,.0f}\n\n"
+                f"── CRUCE GENERAL ──\n"
+                f"  Cuadran:        {res['cuadra']}\n"
+                f"  Dif. ≤1%:       {res['dif_menor']}\n"
+                f"  Sin match:      {res['sin_match']}\n"
+                f"  Solo en banco:  {res['solo_banco']}\n"
+                f"  Dif. neta:      ${res['diferencia_neta']:,.0f}\n\n"
+                f"── NÓMINA ──\n"
+                f"  Fechas:         {res['nom_fechas']}\n"
+                f"  Cuadran:        {res['nom_cuadra']}\n"
+                f"  Con diferencia: {res['nom_dif']}\n"
+                f"  Sin match:      {res['nom_sin_match']}\n"
+                f"  Dif. neta:      ${res['nom_diferencia']:,.0f}\n\n"
+                f"── DATÁFONOS ──\n"
+                f"  Retirados:      {res['datafonos_retirados']} movimientos\n"
+                f"  Valor:          ${res['datafonos_valor']:,.0f}\n\n"
                 f"Archivo:\n{out}"))
 
         except NotImplementedError as nie:

@@ -44,24 +44,28 @@ El CLAUDE.md raíz de JAGI Industry define el stack tecnológico, la arquitectur
 JAGI_Contabilidad/
 ├── CLAUDE.md
 ├── REGLAS_CONCILIACION_DATAFONOS.md
-├── Manual_Conciliacion_Datafonos_v1.5.docx
-├── Conciliacion_Claude 1.5/
+├── conversor_txt_excel.py
+├── conversor_txt_excel_sin_saldo.py
+├── launcher.py
+├── renombrar_datafonos.py
+├── conciliador_bancario/
+│   ├── __init__.py
+│   ├── engine_bancario.py
+│   └── app_bancario.py
+├── conciliador_datafonos/
+│   ├── __init__.py
 │   ├── conciliador_engine.py
 │   └── app_conciliador.py
-├── Conciliacion_Claude 1.6/
-│   ├── conciliador_engine.py
-│   └── app_conciliador.py
-└── Archivos 2025 CTA 2346/
-    └── 01-ENERO/                          ← carpeta por mes (01-ENERO, 02-FEBRERO, etc.)
-        ├── AUXILIAR CTA 2346 Enero 2025.xlsx  ← un único auxiliar por mes
-        ├── EXTRACTO ENERO 2025 TXT.txt        ← extracto bancario en texto
-        └── datafono_[SEDE].xlsx               ← un archivo por sede
-            Sedes activas enero 2025:
-            BARRANQUILLA, BUENAVISTA, CENTRO MAYOR, CHIPICHAPE,
-            EDEN, ENVIGADO, FABRICATO, JARDIN PLAZA, MERCURIO,
-            MOLINOS, NUESTRO BOGOTA, PASTO, PLAZA IMPERIAL,
-            PUERTA DEL NORTE, SANTA FE, SANTA MARTA, SINCELEJO
-            (+ otras sedes según mes)
+├── config/
+│   ├── __init__.py
+│   ├── empresas.py
+├── data/
+│   └── CTA_2346/
+│       └── bancos_2025_CTA_2346/
+│       └──datafonos_2025_CTA_2346
+├── manuales/
+│   ├── Manual_Conciliacion_Datafonos_v1_6.docx
+│   ├── Manual_Conciliador_Bancario_v1.1
 
 Convención de nombres:
 - Auxiliar:  AUXILIAR CTA 2346 [Mes] [Año].xlsx

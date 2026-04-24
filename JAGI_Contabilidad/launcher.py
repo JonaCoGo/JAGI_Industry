@@ -2,6 +2,8 @@
 launcher.py — JAGI CAPS — Menú principal de sistemas de conciliación
 Abre el módulo seleccionado como proceso independiente.
 """
+import sys
+import os
 import tkinter as tk
 from tkinter import ttk
 import subprocess, sys
@@ -26,8 +28,8 @@ class Launcher(tk.Tk):
                  font=("Arial",10)).pack(pady=12)
 
         modulos = [
-            ("🏪  Conciliación de Datafonos",  "app_conciliador.py"),
-            ("🏦  Conciliación Bancaria",       "conciliador_bancario/app_bancario.py"),
+            ("🏪  Conciliación de Datafonos",  "conciliador_datafonos/app_conciliador.py"),
+            ("🏦  Conciliación Bancaria",      "conciliador_bancario/app_bancario.py"),
         ]
         for lbl, script in modulos:
             b = tk.Button(self, text=lbl,
@@ -43,8 +45,13 @@ class Launcher(tk.Tk):
                  bg=C["bg"], fg="#445577", font=("Arial",9)).pack(side="bottom", pady=10)
 
     def _abrir(self, script: str):
-        path = Path(__file__).parent / script
-        subprocess.Popen([sys.executable, str(path)])
+        base_dir = Path(__file__).parent
+        modulo = script.replace("/", ".").replace(".py", "")
+        
+        subprocess.Popen(
+            [sys.executable, "-m", modulo],
+            cwd=base_dir
+        )
 
 
 if __name__ == "__main__":
